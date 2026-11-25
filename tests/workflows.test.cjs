@@ -3,14 +3,16 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
+const recordsSource=fs.readFileSync(require('node:path').join(__dirname,'../dist/records.js'),'utf8');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../dist/app.js'),'utf8');
 function harness(){
  const elements=new Map();
  const doc={querySelector:s=>{if(!elements.has(s))elements.set(s,{innerHTML:'',textContent:'',style:{},hidden:false,scrollIntoView(){},focus(){}});return elements.get(s)},querySelectorAll:()=>[],documentElement:{style:{setProperty(){}}},addEventListener(){}};
  class FrozenDate extends Date { constructor(...args){super(...(args.length?args:['2026-11-25T10:00:00Z']))} static now(){return new Date('2026-11-25T10:00:00Z').getTime()} }
- const c=vm.createContext({document:doc,window:{scrollTo(){}},crypto:webcrypto,localStorage:{getItem:()=>null,setItem(){}},console,Date:FrozenDate,Intl,URL,Blob,setTimeout:()=>0,clearTimeout(){}});
+ const c=vm.createContext({document:doc,window:{scrollTo(){}},crypto:webcrypto,localStorage:{getItem:()=>null,setItem(){}},console,Date:FrozenDate,Intl,URL,Blob,atob,btoa,TextDecoder,setTimeout:()=>0,clearTimeout(){}});
  vm.runInContext(source,c);
- vm.runInContext("state=seed();modal=(title,body,callback)=>{globalThis.submit=callback};render=()=>{};closeModal=()=>{};toast=()=>{};",c);
+ vm.runInContext(recordsSource,c);
+ vm.runInContext("state=ensureRecordExtensions(seed());modal=(title,body,callback)=>{globalThis.submit=callback};render=()=>{};closeModal=()=>{};toast=()=>{};",c);
  return {run:code=>vm.runInContext(code,c),submit:f=>{c.form=f;return vm.runInContext('submit(form)',c)}};
 }
 const use=(dose='V-10005',recipient='R-2402')=>({dose,recipient,type:'IUI',date:'2026-11-25',cycle:'TEST-CYCLE',note:'test'});
@@ -26,3 +28,63 @@ test('quarantined dose requires valid approval before release',()=>{const h=harn
 test('negative remaining embryo inventory is rejected',()=>{const h=harness();h.run("embryoForm('BZ-1042')");assert.throws(()=>h.submit({donor:'BZ-1042',recipient:'R-2402',date:'2026-11-25',cycle:'NEW',created:'2',used:'3',discarded:'0',location:'TEST',note:'TEST'}),/לעלות/)});
 test('backup validation rejects duplicate identifiers, broken references and impossible counts',()=>{for(const mutation of ["state.donors.push({...state.donors[0]})","state.uses[0].donor='MISSING'","state.embryos[0].used=999"]){const h=harness();h.run(mutation);assert.throws(()=>h.run('validateBackup(state)'))}});
 test('CSV handles quoted commas, CRLF and BOM; unknown donor import fails',()=>{const h=harness();h.run('globalThis.text="\\uFEFFdonor_code,decision,decision_date,received_date,reference,reason,expires\\r\\nBZ-1042,blocked,2026-11-25,2026-11-25,TEST,\\\"reason, details\\\",\\r\\n"');assert.equal(h.run('validateMoh(csvParse(text))[0].reason'),'reason, details');h.run("text=text.replace('BZ-1042','MISSING')");assert.throws(()=>h.run('validateMoh(csvParse(text))'),/לא קיים/)});
+
+test('recipient card retains existing fields and saves structured Appendix D sections',()=>{
+ const h=harness();h.run("recipientForm('R-2402')");
+ h.submit({id:'R-2402',name:'Synthetic card',status:'active',opened:'2026-05-02',notes:'Demo',card_personal_firstName:'Demo',card_personal_lastName:'Card',card_personal_phone:'000-0000',card_parents_bioFatherFirst:'Synthetic parent',card_partner_firstName:'Synthetic partner',card_appearance_height:'165',card_labs_hiv_result:'ממתין לתוצאה',card_labs_hiv_date:'2026-11-20'});
+ assert.equal(h.run("patient('R-2402').card.parents.bioFatherFirst"),'Synthetic parent');
+ assert.equal(h.run("patient('R-2402').card.labs.hiv_result"),'ממתין לתוצאה');
+ assert.equal(h.run("validateBackup(JSON.parse(JSON.stringify(state))).recipients.length"),16);
+});
+test('nonnumeric physical description cannot be saved as height; no partial recipient edit',()=>{
+ const h=harness();h.run("recipientForm('R-2402')");
+ assert.throws(()=>h.submit({id:'R-2402',name:'Changed',status:'active',opened:'2026-05-02',card_appearance_height:'שחום'}),/מספרי/);
+ assert.equal(h.run("patient('R-2402').name"),'נתרמת הדגמה 2');
+});
+test('followup records preserve dose status and usage count',()=>{
+ const h=harness();h.run("treatmentFollowup('U-0-1')");
+ h.submit({clinical_cycleDay:'8',clinical_concentration:'24.5',clinical_concentrationUnit:'per_ml',clinical_motility:'40',clinical_outcome:'positive',clinical_sex:'unknown',clinical_notes:'Demo followup',sourceNote:'Synthetic source'});
+ assert.equal(h.run('state.uses.length'),18);
+ assert.equal(h.run("state.doses.find(v=>v.id==='V-10002').status"),'used');
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-1').clinical.motility"),'40');
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-1').followupHistory.length"),1);
+});
+test('invalid motility is rejected before consuming a local vial',()=>{
+ const h=harness();h.run("useForm('V-10005')");
+ assert.throws(()=>h.submit({...use(),clinical_motility:'101'}),/תנועה/);
+ assert.equal(h.run("state.doses.find(v=>v.id==='V-10005').status"),'available');
+});
+test('external historical treatment records do not consume inventory',()=>{
+ const h=harness();h.run("externalTreatmentForm('R-2402')");
+ h.submit({recipient:'R-2402',date:'2026-01-10',bank:'Synthetic outside bank',donor:'',donorCode:'DEMO-EXT',donorAlias:'Demo',method:'AID',cycle:'HIST-1',frozen:'2025-12-01',note:'Synthetic external record',clinical_outcome:'unknown'});
+ assert.equal(h.run('state.externalTreatments.length'),1);
+ assert.equal(h.run('state.uses.length'),18);
+ assert.equal(h.run("state.doses.filter(v=>v.status==='used').length"),18);
+ assert.equal(h.run("treatmentRows('R-2402').some(u=>u.source==='external')"),true);
+});
+test('clinical delivery outcome requires a plausible date and child count',()=>{
+ const h=harness();assert.throws(()=>h.run("validateClinical({outcome:'birth',children:'1'},'2026-01-01')"),/נדרשים/);
+ assert.throws(()=>h.run("validateClinical({outcome:'birth',children:'1',birthDate:'2025-01-01'},'2026-01-01')"),/קודם/);
+});
+test('document backups preserve text bytes and reject executable MIME types',()=>{
+ const h=harness();h.run("state.documents.push({id:'DOC-test',filename:'demo.txt',mime:'text/plain',size:4,dataUrl:'data:text/plain;base64,RGVtbw==',added:'2026-11-25T10:00:00Z',ownerType:'recipient',ownerId:'R-2402'})");
+ assert.equal(h.run('validateBackup(JSON.parse(JSON.stringify(state))).documents[0].dataUrl'),'data:text/plain;base64,RGVtbw==');
+ h.run("state.documents[0].mime='text/html'");assert.throws(()=>h.run('validateBackup(state)'),/נתמכים/);
+});
+test('documents cannot reference a different donor decision or a nonexistent recipient',()=>{
+ for(const owner of ["{ownerType:'recipient',ownerId:'MISSING'}","{ownerType:'donor',ownerId:'BZ-1042',approvalId:'AP-BLOCK'}"]){
+  const h=harness();h.run("state.documents=[{id:'DOC-t',filename:'demo.txt',mime:'text/plain',size:4,dataUrl:'data:text/plain;base64,RGVtbw==',added:'2026-11-25T10:00:00Z',..."+owner+"}]");assert.throws(()=>h.run('validateBackup(state)'));
+ }
+});
+test('reject reason is appended as a decision and remains multiline',async()=>{
+ const h=harness();h.run("approvalForm('BZ-1031','blocked',true)");
+ await h.submit({donor:'BZ-1031',decision:'blocked',date:'2026-11-25',received:'2026-11-25',expires:'',ref:'DEMO-REJECT-2',note:'First demo line\nSecond demo line'});
+ assert.equal(h.run("donor('BZ-1031').blockReason"),'First demo line\nSecond demo line');
+ assert.equal(h.run("donor('BZ-1031').status"),'blocked');
+ assert.equal(h.run("state.approvals.filter(a=>a.donor==='BZ-1031'&&a.decision==='blocked').length"),2);
+});
+test('adding an ordinary approval never silently releases an existing donor rejection',async()=>{
+ const h=harness();h.run("approvalForm('BZ-1031')");
+ await h.submit({donor:'BZ-1031',decision:'approved',date:'2026-11-25',received:'2026-11-25',expires:'2027-12-31',ref:'DEMO-APPROVAL',note:'Synthetic ordinary approval'});
+ assert.equal(h.run("canUse(donor('BZ-1031'))"),false);
+});

@@ -1,11 +1,11 @@
 {
   "name": "sperm-bank-app",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Hebrew RTL sperm bank workflow prototype using synthetic data only",
   "scripts": {
-    "dev": "python3 -m http.server 4173 --directory dist --bind 0.0.0.0",
-    "check": "node --check dist/app.js",
+    "dev": "python3 scripts/dev-server.py",
+    "check": "node --check dist/app.js && node --check dist/records.js",
     "test": "node --test tests/workflows.test.cjs"
   },
   "engines": { "node": ">=20" }

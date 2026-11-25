@@ -68,3 +68,13 @@ Browser QA also verifies rendered Hebrew RTL navigation, rejection of a blocked 
 - https://www.gov.il/he/pages/med-inst-sperm_bank?chapterindex=1
 
 Consulted for initial scoping on 25 November 2026. Local workflows described by the user are the primary functional specification. This prototype does not certify regulatory compliance.
+
+## Version 0.2: Appendix D records and rejection evidence
+
+`dist/records.js` extends the original workflows without clearing the existing localStorage key. Optional `recipient.card` groups hold personal, parent, appearance, partner, partner appearance, labs and family-history fields. Tests are stored verbatim with dates; lab values do not automatically determine eligibility. No patient data copied from the user's sample is embedded in source fixtures.
+
+Local treatment records may carry `clinical` follow-up data. Updating it appends a previous-value/source history and never consumes another vial. `externalTreatments` hold explicitly labelled historical, external treatments without inventory changes or authorization of new clinical action. Delivery fields are treatment-level reported summaries; per-child birth reports remain separate records and are not generated automatically, avoiding duplicate child counts.
+
+`documents` hold browser-local base64 content, metadata, owner and optional decision ID. Supported types are PDF, JPEG, PNG, WebP and plain text, with signature/byte checks. File content, filenames and reason text are escaped or restricted when rendered. HTML/SVG uploads are not supported. Local attachment limits are 1 MiB per file and 1,250 KiB total. Files are included in JSON backups and foreign-key/type checks run on restore. This does not provide server-side file scanning, institution document management, or cross-device synchronization. Camera capture is exposed by a file input with `capture=environment`; actual camera/scanner availability depends on the user's browser and device. There is no automatic OCR or desktop scanner integration. Users can paste text directly or import UTF-8 TXT text after review.
+
+Rejection reasons remain multiline. New or updated reasons append a decision and preserve existing decisions/documents. An ordinary approval cannot silently release a blocked donor. The field map comes from the form supplied in the conversation and is not asserted to be an authenticated current regulatory template.
