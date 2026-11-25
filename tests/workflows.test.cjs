@@ -12,6 +12,7 @@ function harness(){
  const c=vm.createContext({document:doc,window:{scrollTo(){}},crypto:webcrypto,localStorage:{getItem:()=>null,setItem(){}},console,Date:FrozenDate,Intl,URL,Blob,atob,btoa,TextDecoder,setTimeout:()=>0,clearTimeout(){}});
  vm.runInContext(source,c);
  vm.runInContext(recordsSource,c);
+ vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../dist/workspace.js'),'utf8'),c);
  vm.runInContext("state=ensureInseminationNumbers(ensureRecordExtensions(seed()));modal=(title,body,callback)=>{globalThis.submit=callback};render=()=>{};closeModal=()=>{};toast=()=>{};",c);
  return {run:code=>vm.runInContext(code,c),submit:f=>{c.form=f;return vm.runInContext('submit(form)',c)}};
 }
@@ -152,4 +153,16 @@ test('insemination update persists the number and followup without consuming ano
 test('backup validation rejects duplicate IUI numbers and invalid family relationships',()=>{
  const h=harness();h.run("state.uses.find(u=>u.id==='U-0-2').inseminationNumber=1");assert.throws(()=>h.run('validateBackup(state)'),/כפול/);
  const family=harness();family.run("patient('R-2402').relatives={siblings:[{id:'X',fullName:'Demo',relationship:'אחיינית'}],descendants:[]}");assert.throws(()=>family.run('validateBackup(state)'),/קרבה/);
+});
+
+test('workspace search routes donor, recipient and vial queries without losing blocked records',()=>{
+ const h=harness();
+ assert.equal(h.run("searchWorkspaceRecords('bz-1031').find(r=>r.kind==='donor').id"),'BZ-1031');
+ assert.equal(h.run("searchWorkspaceRecords('R-2402').find(r=>r.kind==='recipientDetail').id"),'R-2402');
+ assert.equal(h.run("searchWorkspaceRecords('V-10005').find(r=>r.kind==='locateDose').id"),'V-10005');
+ assert.equal(h.run("searchWorkspaceRecords('B').length"),0);
+});
+test('workspace search excludes confidential identity and family fields',()=>{
+ const h=harness();h.run("state.donors[0].identity={idNumber:'CONFIDENTIAL-IDENTITY-ONLY'};patient('R-2401').card={personal:{identity:'CONFIDENTIAL-RECIPIENT-ONLY'},parents:{bioFatherIdentity:'CONFIDENTIAL-FAMILY-ONLY'}}");
+ assert.equal(h.run("searchWorkspaceRecords('CONFIDENTIAL').length"),0);
 });

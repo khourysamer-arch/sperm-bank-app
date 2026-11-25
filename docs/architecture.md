@@ -4,7 +4,7 @@
 
 This release is an editable, dependency-free browser prototype, not a hospital production system. All initial records are synthetic. Each browser stores its own JSON state in localStorage; there is no backend, server authorization, shared state, institution isolation or national registry integration. Hosting access, when supplied, is separate from application role authorization.
 
-The GitHub repository is the source for ongoing development. The `dist` directory is the runnable application, with no build step. `npm run dev` serves it with Python. A private hosted preview may mirror the same files; GitHub pushes do not automatically deploy that preview.
+The GitHub repository is the source for ongoing development. The `dist` directory is the runnable application, with no build step. `npm run dev` serves it with Python. The existing public Site mirrors the same synthetic prototype; GitHub pushes do not automatically deploy that Site.
 
 ## Record model
 
@@ -86,3 +86,13 @@ The recipient card now contains a focused IUI/AID table matching the user's seve
 `recipient.relatives` has optional `siblings` and `descendants` arrays. The UI provides 10 and 15 initial slots respectively, and supports up to 100 rows per section. A relative stores a stable ID and optional full name, relationship, parent name, birth year, identity and notes. These column labels are implementation choices because the corresponding user-supplied headings were blank. Only populated rows persist; all rows are validated before replacement, and the previous family record/source is retained in `relativesHistory`. Blank slots are not counted as people. Relatives and treatment numbers are included in JSON backup validation and dedicated CSV exports.
 
 Full biological-father, biological-mother and stepfather names are additional fields in the existing parent group. A missing full name falls back to the original split given/family names; no existing fields are removed. The page 4 group derives from the form supplied in this conversation, without asserting regulatory completeness.
+
+## Version 0.4: clinical workspace presentation
+
+The page loads `app.js`, then `records.js`, then `workspace.js`. The final script overrides the shell, dashboard, metric markup and binding wrappers; clinical mutations remain in the original workflow modules. `redesign.css` follows the base stylesheet and provides the shared visual tokens, operational components, responsive layout and print treatment. Hebrew Heebo is served locally with its OFL license, without a font CDN request.
+
+Global search returns record destinations for donor operational fields, recipient display code/name, and vial ID/batch. It deliberately does not index donor identities, recipient identity numbers or family details. Results link to existing record actions; selecting a vial opens the inventory with the identifier filter. Search results and activity text are escaped. No national counts or trend estimates are manufactured for the dashboard.
+
+The persistent key remains `zera-bank-demo-v1.1`. The old default accent migrates to the new blue; other custom accents remain. All Appendix D, rejection-document, IUI numbering, family, inventory and block workflows are retained. The modal submit button shows a pending state and restores after a failed submission; errors are announced and focused. Keyboard tab trapping skips hidden details fields.
+
+QA for this release: automated workflow checks run with `workspace.js` loaded; browser checks cover dashboard, global search, blocked donor detail, rejection evidence form, recipient card and IUI table at desktop viewport. Narrow layouts are implemented in CSS; actual mobile hardware and camera capture are not validated by this redesign pass. Browser extension diagnostics are separate from app errors.
