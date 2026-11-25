@@ -10,6 +10,7 @@ const CARD_GROUPS = [
     ['birthCountry','ארץ לידה'],['motherOrigin','מוצא אם'],['fatherOrigin','מוצא אב']
   ]},
   {id:'parents',title:'פרטי הורים ביולוגיים וחורגים',fields:[
+    ['bioFatherFull','שם מלא אב ביולוגי'],['bioMotherFull','שם מלא אם ביולוגית'],['stepFatherFull','שם מלא אב חורג'],
     ['bioFatherFirst','שם פרטי אב ביולוגי'],['bioFatherFather','שם אבא של האב הביולוגי'],
     ['bioFatherLast','שם משפחה אב ביולוגי'],['bioFatherIdentity','ת״ז אב ביולוגי'],
     ['bioMotherFirst','שם פרטי אם ביולוגית'],['bioMotherFather','שם אבא של האם הביולוגית'],
@@ -39,7 +40,7 @@ const LAB_TESTS = [
   ['hcv','HCV (צהבת C)'],['rubella','RUBELLA (אדמת)'],['genetics','סקר גנטי']
 ];
 const PARTNER_TESTS = [['blood','סוג דם ו־RH — בן / בת זוג'],['hbsag','HBsAg — בן / בת זוג'],['hcv','HCV — בן / בת זוג']];
-const CARD_TABS = [['personal','פרטים אישיים'],['parents','הורים ותיאור'],['partner','בן / בת זוג'],['labs','בדיקות מעבדה'],['treatments','טיפולים והריונות'],['documents','מסמכים']];
+const CARD_TABS = [['personal','פרטים אישיים'],['parents','פרטי הורים'],['relatives','אחים וצאצאים'],['partner','בן / בת זוג'],['labs','בדיקות מעבדה'],['inseminations','מעקב הזרעות'],['treatments','טיפולים והריונות'],['documents','מסמכים']];
 const OUTCOMES = {unknown:'טרם דווחה',negative:'ללא הריון',positive:'בדיקת הריון חיובית',clinical:'הריון קליני',ongoing:'הריון מתמשך',loss:'אובדן הריון',birth:'הריון ולידה',ectopic:'הריון חוץ רחמי'};
 const SEXES = {unknown:'לא דווח',female:'נקבה',male:'זכר',mixed:'זכר ונקבה',other:'אחר / לא צוין'};
 let recipientTab = 'personal';
@@ -51,7 +52,13 @@ function ensureRecordExtensions(s) {
 }
 ensureRecordExtensions(state);
 
-function cardValue(p, group, key) { return p.card?.[group]?.[key] ?? ''; }
+function cardValue(p, group, key) {
+  const value=p.card?.[group]?.[key];
+  if(value!==undefined&&value!=='')return value;
+  const parts={bioFatherFull:['bioFatherFirst','bioFatherLast'],bioMotherFull:['bioMotherFirst','bioMotherLast'],stepFatherFull:['stepFatherFirst','stepFatherLast']};
+  if(group==='parents'&&parts[key])return parts[key].map(k=>p.card?.parents?.[k]||'').filter(Boolean).join(' ');
+  return value??'';
+}
 function cardFieldName(group,key) { return 'card_'+group+'_'+key; }
 function cardField(group,spec,p) {
   const [key,label,kind='text'] = spec;
@@ -155,6 +162,8 @@ function recipientPage() {
   if(recipientTab==='partner')body=`<div class="detail-body">${kvCard(p,'partner',CARD_GROUPS[3].fields)}<h3 class="subheading">תיאור חיצוני — בן / בת זוג</h3>${kvCard(p,'partnerAppearance',CARD_GROUPS[4].fields)}</div><div class="panel-head"><h2>בדיקות מעבדה — בן / בת זוג</h2></div>${labCard(p,'partnerLabs',PARTNER_TESTS)}`;
   if(recipientTab==='labs')body=labCard(p,'labs',LAB_TESTS);
   if(recipientTab==='treatments')body=`<div class="detail-body actions">${btn('טיפול ממנה ביחידה','recipientUse','plus',true,p.id)}${btn('תיעוד טיפול היסטורי חיצוני','externalTreatment','file',false,p.id)}${btn('רישום לידה','addBirth','baby')}</div>${treatmentTable(treatments)}<div class="panel-head"><h2>מלאי עוברים</h2></div>${embryoTable(state.embryos.filter(e=>e.recipient===p.id))}<div class="panel-head"><h2>דיווחי לידה פרטניים</h2></div>${birthTable(state.births.filter(b=>b.recipient===p.id))}`;
+  if(recipientTab==='inseminations')body=inseminationCard(p);
+  if(recipientTab==='relatives')body=relativesCard(p);
   if(recipientTab==='documents')body=`<div class="detail-body actions">${btn('הוספת סריקה / מסמך','recipientDocument','upload',true,p.id)}</div>${documentsList(docs)}`;
   return heading('כרטיס נתרמת '+esc(p.id),'נספח ד׳ · '+esc(p.name),btn('חזרה לנתרמות','backRecipients')+btn('ייצוא מעקב טיפולים','exportRecipientTreatment','download',false,p.id)+btn('עריכת כרטיס','editRecipient','edit',true,p.id))+`
     <div class="recipient-summary"><div class="recipient-initial">${icon('heart',28)}</div><div><h2>${esc(p.name)}</h2><p>${esc(p.id)} · נפתח ${fmt(p.opened)}</p></div><div class="recipient-stat"><strong>${treatments.length}</strong><span>טיפולים מתועדים</span></div><div class="recipient-stat"><strong>${frozenCount}</strong><span>עוברים מוקפאים</span></div><div class="recipient-stat"><strong>${docs.length}</strong><span>מסמכים מצורפים</span></div>${badge(recStatus[p.status],p.status==='active'?'good':'neutral')}</div>
@@ -447,4 +456,174 @@ bind=function() {
     $$('#recipientResults [data-action]').forEach(b=>b.onclick=()=>act(b.dataset.action,b.dataset.id));
   };
 };
+render();
+
+// Supplement supplied by the user: page 3 inseminations and page 4 relatives.
+const RELATIVE_GROUPS = {
+  siblings:{title:'פירוט אחים ואחיות — חלק ב׳',minimumRows:10,relationships:['אח','אחות','אח למחצה','אחות למחצה','אחר / לא צוין']},
+  descendants:{title:'פירוט אחיינים וצאצאים — חלק ג׳',minimumRows:15,relationships:['אחיין','אחיינית','בן','בת','נכד','נכדה','אחר / לא צוין']}
+};
+const RELATIVE_FIELDS=[['fullName','שם מלא'],['relationship','קרבה משפחתית'],['parentName','בן / בת של'],['birthYear','שנת לידה'],['identity','ת״ז / מזהה'],['notes','הערות / מידע משפחתי']];
+function validateRelatives(relatives) {
+  requireCondition(relatives&&typeof relatives==='object'&&!Array.isArray(relatives),'מבנה פירוט בני המשפחה אינו תקין');
+  requireCondition(Object.keys(relatives).every(k=>Object.hasOwn(RELATIVE_GROUPS,k)),'קבוצת בני משפחה לא מוכרת');
+  const ids=new Set();
+  for(const [group,config] of Object.entries(RELATIVE_GROUPS)) {
+    const members=relatives[group]||[];
+    requireCondition(Array.isArray(members)&&members.length<=100,'עד 100 בני משפחה בכל חלק');
+    for(const member of members) {
+      requireCondition(member&&typeof member==='object'&&!Array.isArray(member)&&typeof member.id==='string'&&member.id.length<=80,'רשומת בן משפחה אינה תקינה');
+      requireCondition(!ids.has(member.id),'מזהי בני משפחה כפולים');ids.add(member.id);
+      for(const [key,label] of RELATIVE_FIELDS)requireCondition(member[key]===undefined||(typeof member[key]==='string'&&member[key].length<=(key==='notes'?3000:500)),'שדה משפחה אינו תקין: '+label);
+      requireCondition(RELATIVE_FIELDS.some(([key])=>String(member[key]||'').trim()),'רשומת בן משפחה ריקה');
+      if(member.birthYear)requireCondition(/^\d{4}$/.test(member.birthYear)&&Number(member.birthYear)>=1900&&Number(member.birthYear)<=new Date().getFullYear(),'שנת לידה של בן משפחה אינה תקינה');
+      requireCondition(!member.relationship||config.relationships.includes(member.relationship),'קרבה משפחתית אינה מתאימה לחלק בטופס');
+    }
+  }
+  return relatives;
+}
+function relativeRows(p,group) {
+  const config=RELATIVE_GROUPS[group],members=p.relatives?.[group]||[];
+  return Array.from({length:Math.max(config.minimumRows,members.length)},(_,i)=>({number:i+1,member:members[i]||null}));
+}
+function relativeTable(p,group) {
+  return table(['מס׳',...RELATIVE_FIELDS.map(f=>f[1])],relativeRows(p,group).map(({number,member})=>[
+    number,...RELATIVE_FIELDS.map(([key])=>`<div class="relative-cell prewrap">${esc(member?.[key]||'—')}</div>`)
+  ]));
+}
+function relativesCard(p) {
+  return `<div class="detail-body"><div class="actions">${btn('עריכת אחים וצאצאים','editRelatives','edit',true,p.id)}${btn('ייצוא פרטי משפחה','exportRelatives','download',false,p.id)}</div><p class="label-note">10 שורות לאחים ואחיות ו־15 לאחיינים וצאצאים, עם אפשרות להוספת שורות. שורות ריקות הן מקום למילוי ואינן רשומות שמורות.</p></div>`+
+    Object.entries(RELATIVE_GROUPS).map(([group,config])=>`<div class="panel-head"><h2>${config.title}</h2><span class="last-update">${(p.relatives?.[group]||[]).length} רשומות שמורות</span></div>${relativeTable(p,group)}`).join('');
+}
+function relativeEditorRow(group,index,member={}) {
+  const prefix=group+'_'+index+'_';
+  return `<tr data-relative-row="${group}"><td>${index+1}<input type="hidden" name="${prefix}id" value="${esc(member.id||'')}"></td>${RELATIVE_FIELDS.map(([key,label])=>{
+    const name=prefix+key,aria=`${RELATIVE_GROUPS[group].title}, שורה ${index+1}, ${label}`;
+    const value=member[key]||'';
+    if(key==='relationship')return `<td><select name="${name}" aria-label="${aria}"><option value="">לא הוזן</option>${RELATIVE_GROUPS[group].relationships.map(v=>`<option value="${esc(v)}" ${value===v?'selected':''}>${esc(v)}</option>`).join('')}</select></td>`;
+    if(key==='notes')return `<td><textarea name="${name}" aria-label="${aria}" maxlength="3000" rows="2">${esc(value)}</textarea></td>`;
+    return `<td><input name="${name}" aria-label="${aria}" type="${key==='birthYear'?'number':'text'}" value="${esc(value)}" ${key==='birthYear'?`min="1900" max="${new Date().getFullYear()}" step="1"`:'maxlength="500"'}></td>`;
+  }).join('')}</tr>`;
+}
+function collectRelatives(f) {
+  const relatives={siblings:[],descendants:[]};
+  for(const group of Object.keys(RELATIVE_GROUPS)) {
+    const indexes=[...new Set(Object.keys(f).map(k=>k.match(new RegExp('^'+group+'_(\\d+)_'))?.[1]).filter(v=>v!==undefined))].map(Number).sort((a,b)=>a-b);
+    requireCondition(indexes.length<=100,'עד 100 שורות לכל חלק');
+    for(const i of indexes) {
+      const member={};for(const [key] of RELATIVE_FIELDS)member[key]=String(f[group+'_'+i+'_'+key]||'').trim();
+      if(!Object.values(member).some(Boolean))continue;
+      member.id=String(f[group+'_'+i+'_id']||'').trim()||uid('REL');relatives[group].push(member);
+    }
+  }
+  return validateRelatives(relatives);
+}
+function editRelativesForm(id) {
+  const p=patient(id);requireCondition(p,'כרטיס הנתרמת לא נמצא');
+  modal('פרטי משפחה — אחים, אחיות, אחיינים וצאצאים',`
+    <div class="notice">פרטי הורים נמצאים בלשונית ״פרטי הורים״. בטופס שהעברת לא צוינו כותרות לפירוט בני המשפחה; העמודות כאן מאפשרות לתעד שם, קרבה, בן/בת של, שנת לידה, מזהה והערות.</div>
+    ${Object.entries(RELATIVE_GROUPS).map(([group,config])=>`<details class="card-form-section" open><summary>${config.title}</summary><div class="table-wrap"><table class="relative-editor"><thead><tr><th>מס׳</th>${RELATIVE_FIELDS.map(f=>`<th>${f[1]}</th>`).join('')}</tr></thead><tbody id="relative-${group}">${relativeRows(p,group).map(({number,member})=>relativeEditorRow(group,number-1,member||{})).join('')}</tbody></table></div><div class="relative-footer"><button type="button" class="btn small" data-add-relative="${group}">${icon('plus',15)}הוספת שורה</button><span class="label-note">שורות ריקות לא נשמרות</span></div></details>`).join('')}
+    ${field('familySource','מקור המידע / הערה לעדכון','textarea','',false,true)}`,f=>{
+      const relatives=collectRelatives(f); // Validate all rows before replacing the previous family record.
+      p.relativesHistory??=[];p.relativesHistory.push({time:new Date().toISOString(),previous:p.relatives||{siblings:[],descendants:[]},source:f.familySource||''});
+      p.relatives=relatives;recipientTab='relatives';view='recipient';selected=id;
+      done('עודכנו פרטי משפחה לנתרמת '+id+' · '+relatives.siblings.length+' אחים/אחיות, '+relatives.descendants.length+' אחיינים/צאצאים');
+    });
+  $('#overlay .modal')?.classList?.add('wide-modal');
+  $$('[data-add-relative]').forEach(b=>b.onclick=()=>{
+    const group=b.dataset.addRelative,body=$('#relative-'+group),count=body.querySelectorAll('tr').length;
+    if(count>=100){toast('ניתן להוסיף עד 100 שורות לכל חלק');return;}
+    body.insertAdjacentHTML('beforeend',relativeEditorRow(group,count));
+    body.lastElementChild?.querySelector('input:not([type="hidden"])')?.focus();
+  });
+}
+
+function isInsemination(u) { return u.type==='IUI'||u.type==='AID'||u.method==='AID'; }
+function allTreatmentsIn(s) { return [...s.uses,...(s.externalTreatments||[])]; }
+function validateInseminationNumbers(s) {
+  const byRecipient=new Map();
+  for(const u of allTreatmentsIn(s).filter(isInsemination)) {
+    if(u.inseminationNumber===undefined||u.inseminationNumber===null||u.inseminationNumber==='')continue;
+    requireCondition(Number.isInteger(u.inseminationNumber)&&u.inseminationNumber>=1&&u.inseminationNumber<=9999,'מספר טיפול הזרעה אינו תקין');
+    if(!byRecipient.has(u.recipient))byRecipient.set(u.recipient,new Set());
+    const used=byRecipient.get(u.recipient);requireCondition(!used.has(u.inseminationNumber),'מספר טיפול הזרעה כפול באותו כרטיס נתרמת');used.add(u.inseminationNumber);
+  }
+  return byRecipient;
+}
+function ensureInseminationNumbers(s) {
+  const numbers=validateInseminationNumbers(s);
+  const rows=allTreatmentsIn(s).filter(isInsemination).sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id));
+  for(const u of rows) {
+    if(!numbers.has(u.recipient))numbers.set(u.recipient,new Set());
+    const used=numbers.get(u.recipient);
+    if(u.inseminationNumber===undefined||u.inseminationNumber===null||u.inseminationNumber==='') {
+      let n=1;while(used.has(n))n++;
+      requireCondition(n<=9999,'מספר טיפולי ההזרעה גדול מדי');u.inseminationNumber=n;used.add(n);
+    }
+  }
+  return s;
+}
+function inseminationRows(id) {
+  const rows=treatmentRows(id).filter(isInsemination).sort((a,b)=>a.inseminationNumber-b.inseminationNumber);
+  const numbers=new Set(rows.map(u=>u.inseminationNumber));
+  const result=rows.map(u=>({number:u.inseminationNumber,treatment:u}));
+  for(let n=1;n<=5;n++)if(!numbers.has(n))result.push({number:n,treatment:null});
+  return result.sort((a,b)=>a.number-b.number);
+}
+function inseminationSummary(u) {
+  const c=u.clinical||{},parts=[];
+  if(c.concentration!==undefined&&c.concentration!=='')parts.push('ריכוז: '+c.concentration+' ×10^6'+(c.concentrationUnit==='per_ml'?' למ״ל':c.concentrationUnit==='total'?' סה״כ':''));
+  if(c.motility!==undefined&&c.motility!=='')parts.push('תנועה: '+c.motility+'%');
+  return parts.join('\n')||'—';
+}
+function inseminationCard(p) {
+  const rows=inseminationRows(p.id),count=rows.filter(r=>r.treatment).length;
+  return `<div class="detail-body"><div class="actions">${btn('רישום הזרעה ממנה ביחידה','recipientInsemination','plus',true,p.id)}${btn('תיעוד הזרעה היסטורית חיצונית','externalInsemination','file',false,p.id)}${btn('ייצוא מעקב הזרעות','exportInseminations','download',false,p.id)}</div><p class="label-note">דף 3 · ${count} הזרעות מתועדות. מספר טיפול נשמר לכל נתרמת; שורות ריקות הן מקום למילוי ואינן גורעות מנות מהמלאי.</p></div>`+
+    table(['מס׳ טיפול','תאריך','יום במחזור','מס׳ תורם','איכות ריר','ריכוז / תנועתיות','תוצאת הריון','פעולה'],rows.map(({number,treatment:u})=>{
+      if(!u)return [number,'—','—','—','—','—','—','<span class="label-note">טרם תועד טיפול</span>'];
+      const c=u.clinical||{},d=donor(u.donor);
+      return [number,`${fmt(u.date)}<small>${u.source==='external'?'תיעוד חיצוני':'מנה מהיחידה'}</small>`,esc(c.cycleDay||'—'),d?donorLink(d.id):`${esc(u.donorCode||'—')}<small>${esc(u.donorAlias||'')}</small>`,esc(c.mucusQuality||'—'),`<div class="insemination-values">${esc(inseminationSummary(u))}</div>`,badge(OUTCOMES[c.outcome]||OUTCOMES.unknown,c.outcome==='birth'?'good':'neutral'),btn('עדכון הזרעה','editInsemination','edit',false,u.id)];
+    }));
+}
+function editInseminationForm(id) {
+  const u=allTreatmentsIn(state).find(u=>u.id===id);requireCondition(u&&isInsemination(u),'רשומת ההזרעה לא נמצאה');
+  modal('עדכון פרטי הזרעה ותוצאת הריון',`<div class="notice">טיפול מ־${fmt(u.date)} · נתרמת ${esc(u.recipient)}. התורם, המנה ותאריך הטיפול נשמרים ברשומת המקור.</div><div class="form-grid">${field('inseminationNumber','מספר טיפול הזרעה','number',u.inseminationNumber,true,false,'min="1" max="9999" step="1"')}${clinicalFormFields(u.clinical||{})}${field('sourceNote','מקור המידע / אסמכתת עדכון','textarea','',true,true)}</div>`,f=>{
+    const n=Number(f.inseminationNumber);
+    requireCondition(Number.isInteger(n)&&n>=1&&n<=9999,'יש להזין מספר טיפול שלם וחיובי');
+    requireCondition(!allTreatmentsIn(state).some(other=>other.id!==u.id&&other.recipient===u.recipient&&isInsemination(other)&&other.inseminationNumber===n),'מספר הטיפול כבר קיים בכרטיס הנתרמת');
+    const clinical=collectClinical(f,u.date);requireCondition(f.sourceNote.trim(),'יש להזין מקור מידע');
+    u.followupHistory??=[];u.followupHistory.push({time:new Date().toISOString(),previous:u.clinical||{},previousInseminationNumber:u.inseminationNumber,source:f.sourceNote});
+    u.inseminationNumber=n;u.clinical=clinical;recipientTab='inseminations';view='recipient';selected=u.recipient;
+    done('עודכנה הזרעה מספר '+n+' לנתרמת '+u.recipient+' · '+f.sourceNote);
+  });$('#overlay .modal')?.classList?.add('wide-modal');
+}
+const extendedBackupValidator=validateBackup;
+validateBackup=function(s) {
+  extendedBackupValidator(s);
+  for(const p of s.recipients)if(p.relatives!==undefined)validateRelatives(p.relatives);
+  validateInseminationNumbers(s);return ensureInseminationNumbers(s);
+};
+const saveBeforeInseminationNumbers=save;
+save=function(action) {ensureInseminationNumbers(state);return saveBeforeInseminationNumbers(action);};
+const actBeforeFamily=act;
+act=function(action,id) {
+  try {
+    if(action==='editRelatives')return editRelativesForm(id);
+    if(action==='editInsemination')return editInseminationForm(id);
+    if(action==='recipientInsemination')return useForm(null,id);
+    if(action==='externalInsemination')return externalTreatmentForm(id);
+    if(action==='exportRelatives') {
+      const p=patient(id||selected);requireCondition(p,'הנתרמת לא נמצאה');
+      return csv('recipient_family_'+p.id,['קוד נתרמת','חלק בטופס','מס׳',...RELATIVE_FIELDS.map(f=>f[1])],Object.entries(RELATIVE_GROUPS).flatMap(([group,config])=>(p.relatives?.[group]||[]).map((m,i)=>[p.id,config.title,i+1,...RELATIVE_FIELDS.map(([key])=>m[key]||'')])));
+    }
+    if(action==='exportInseminations') {
+      const pid=id||selected;
+      return csv('inseminations_'+pid,['קוד נתרמת','מספר טיפול','תאריך','יום במחזור','מספר תורם','איכות ריר','ריכוז','יחידת ריכוז','תנועה אחוז','תוצאת הריון','מקור'],inseminationRows(pid).filter(r=>r.treatment).map(({number,treatment:u})=>{
+        const c=u.clinical||{},d=donor(u.donor);return [pid,number,u.date,c.cycleDay,d?.id||u.donorCode,c.mucusQuality,c.concentration,c.concentrationUnit,c.motility,OUTCOMES[c.outcome]||OUTCOMES.unknown,u.source];
+      }));
+    }
+    return actBeforeFamily(action,id);
+  }catch(error){toast(error.message)}
+};
+ensureInseminationNumbers(state);
 render();

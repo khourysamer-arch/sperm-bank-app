@@ -1,6 +1,6 @@
 {
   "name": "sperm-bank-app",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Hebrew RTL sperm bank workflow prototype using synthetic data only",
   "scripts": {

@@ -12,7 +12,7 @@ function harness(){
  const c=vm.createContext({document:doc,window:{scrollTo(){}},crypto:webcrypto,localStorage:{getItem:()=>null,setItem(){}},console,Date:FrozenDate,Intl,URL,Blob,atob,btoa,TextDecoder,setTimeout:()=>0,clearTimeout(){}});
  vm.runInContext(source,c);
  vm.runInContext(recordsSource,c);
- vm.runInContext("state=ensureRecordExtensions(seed());modal=(title,body,callback)=>{globalThis.submit=callback};render=()=>{};closeModal=()=>{};toast=()=>{};",c);
+ vm.runInContext("state=ensureInseminationNumbers(ensureRecordExtensions(seed()));modal=(title,body,callback)=>{globalThis.submit=callback};render=()=>{};closeModal=()=>{};toast=()=>{};",c);
  return {run:code=>vm.runInContext(code,c),submit:f=>{c.form=f;return vm.runInContext('submit(form)',c)}};
 }
 const use=(dose='V-10005',recipient='R-2402')=>({dose,recipient,type:'IUI',date:'2026-11-25',cycle:'TEST-CYCLE',note:'test'});
@@ -87,4 +87,69 @@ test('adding an ordinary approval never silently releases an existing donor reje
  const h=harness();h.run("approvalForm('BZ-1031')");
  await h.submit({donor:'BZ-1031',decision:'approved',date:'2026-11-25',received:'2026-11-25',expires:'2027-12-31',ref:'DEMO-APPROVAL',note:'Synthetic ordinary approval'});
  assert.equal(h.run("canUse(donor('BZ-1031'))"),false);
+});
+
+test('full parent names fall back to previous split fields without deleting them',()=>{
+ const h=harness();h.run("patient('R-2402').card={parents:{bioFatherFirst:'Synthetic',bioFatherLast:'Parent',bioMotherFirst:'Demo',bioMotherLast:'Mother',stepFatherFirst:'Step',stepFatherLast:'Parent'}}");
+ assert.equal(h.run("cardValue(patient('R-2402'),'parents','bioFatherFull')"),'Synthetic Parent');
+ assert.equal(h.run("cardValue(patient('R-2402'),'parents','bioMotherFull')"),'Demo Mother');
+ assert.equal(h.run("cardValue(patient('R-2402'),'parents','stepFatherFull')"),'Step Parent');
+ h.run("recipientForm('R-2402')");h.submit({id:'R-2402',name:'Synthetic card',status:'active',opened:'2026-05-02',card_parents_bioFatherFull:'Explicit Full Name'});
+ assert.equal(h.run("patient('R-2402').card.parents.bioFatherFirst"),'Synthetic');
+ assert.equal(h.run("cardValue(patient('R-2402'),'parents','bioFatherFull')"),'Explicit Full Name');
+});
+test('family tables expose ten and fifteen blank slots without creating stored relatives',()=>{
+ const h=harness();assert.equal(h.run("relativeRows(patient('R-2402'),'siblings').length"),10);
+ assert.equal(h.run("relativeRows(patient('R-2402'),'descendants').length"),15);
+ assert.equal(h.run("relativeRows(patient('R-2402'),'siblings').filter(r=>r.member).length"),0);
+ assert.equal(h.run("patient('R-2402').relatives"),undefined);
+});
+test('family form saves populated rows only, preserves identifiers and retains previous version',()=>{
+ const h=harness();h.run("editRelativesForm('R-2402')");
+ h.submit({sibling_unused:'',siblings_0_fullName:'Synthetic sibling',siblings_0_relationship:'אחות',siblings_0_birthYear:'1980',siblings_0_identity:'DEMO-SIB',siblings_1_fullName:'',descendants_0_fullName:'Synthetic niece',descendants_0_relationship:'אחיינית',descendants_0_parentName:'Synthetic sibling',descendants_0_birthYear:'2005',familySource:'Synthetic source'});
+ assert.equal(h.run("patient('R-2402').relatives.siblings.length"),1);assert.equal(h.run("patient('R-2402').relatives.descendants.length"),1);
+ const id=h.run("patient('R-2402').relatives.siblings[0].id");h.run("editRelativesForm('R-2402')");
+ h.submit({siblings_0_id:id,siblings_0_fullName:'Updated synthetic sibling',siblings_0_relationship:'אחות'});
+ assert.equal(h.run("patient('R-2402').relatives.siblings[0].id"),id);
+ assert.equal(h.run("patient('R-2402').relativesHistory.length"),2);
+ assert.equal(h.run("patient('R-2402').relativesHistory[1].previous.descendants.length"),1);
+ assert.equal(h.run("validateBackup(JSON.parse(JSON.stringify(state))).recipients.find(p=>p.id==='R-2402').relatives.siblings.length"),1);
+});
+test('invalid family rows do not partially replace saved relatives',()=>{
+ const h=harness();h.run("patient('R-2402').relatives={siblings:[{id:'REL-old',fullName:'Existing demo sibling'}],descendants:[]};editRelativesForm('R-2402')");
+ assert.throws(()=>h.submit({siblings_0_fullName:'New demo sibling',siblings_0_birthYear:'2027'}),/שנת לידה/);
+ assert.equal(h.run("patient('R-2402').relatives.siblings[0].id"),'REL-old');
+});
+test('additional relatives beyond the printed template fit and roundtrip',()=>{
+ const h=harness();h.run("patient('R-2402').relatives={siblings:Array.from({length:12},(_,i)=>({id:'S-'+i,fullName:'Sibling '+i})),descendants:Array.from({length:17},(_,i)=>({id:'D-'+i,fullName:'Descendant '+i}))}");
+ assert.equal(h.run("relativeRows(patient('R-2402'),'siblings').length"),12);
+ assert.equal(h.run("relativeRows(patient('R-2402'),'descendants').length"),17);
+ assert.equal(h.run("validateBackup(JSON.parse(JSON.stringify(state))).recipients.find(p=>p.id==='R-2402').relatives.descendants.length"),17);
+});
+test('IUI and AID share per-recipient numbering while IVF is excluded',()=>{
+ const h=harness();h.run("state.externalTreatments.push({id:'EXT-IUI',recipient:'R-2401',date:'2026-01-01',type:'IUI',method:'AID',bank:'Demo bank',donor:'',donorCode:'DEMO'});ensureInseminationNumbers(state)");
+ assert.equal(h.run("state.externalTreatments[0].inseminationNumber"),3);
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-0').inseminationNumber"),1);
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-1').inseminationNumber"),undefined);
+ assert.equal(h.run("inseminationRows('R-2401').filter(r=>r.treatment).length"),3);
+ assert.equal(h.run("inseminationRows('R-2401').length"),5);
+});
+test('editing insemination numbers rejects duplicates before any clinical update',()=>{
+ const h=harness();h.run("editInseminationForm('U-0-2')");
+ assert.throws(()=>h.submit({inseminationNumber:'1',clinical_cycleDay:'9',clinical_outcome:'positive',sourceNote:'Demo source'}),/כבר קיים/);
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-2').inseminationNumber"),2);
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-2').clinical"),undefined);
+});
+test('insemination update persists the number and followup without consuming another dose',()=>{
+ const h=harness();h.run("editInseminationForm('U-0-2')");
+ h.submit({inseminationNumber:'4',clinical_cycleDay:'9',clinical_mucusQuality:'טוב',clinical_concentration:'20',clinical_concentrationUnit:'per_ml',clinical_motility:'50',clinical_outcome:'positive',sourceNote:'Synthetic followup'});
+ assert.equal(h.run('state.uses.length'),18);
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-2').inseminationNumber"),4);
+ assert.equal(h.run("state.uses.find(u=>u.id==='U-0-2').clinical.cycleDay"),'9');
+ assert.equal(h.run("state.doses.find(v=>v.id==='V-10003').status"),'used');
+ assert.equal(h.run("validateBackup(JSON.parse(JSON.stringify(state))).uses.find(u=>u.id==='U-0-2').inseminationNumber"),4);
+});
+test('backup validation rejects duplicate IUI numbers and invalid family relationships',()=>{
+ const h=harness();h.run("state.uses.find(u=>u.id==='U-0-2').inseminationNumber=1");assert.throws(()=>h.run('validateBackup(state)'),/כפול/);
+ const family=harness();family.run("patient('R-2402').relatives={siblings:[{id:'X',fullName:'Demo',relationship:'אחיינית'}],descendants:[]}");assert.throws(()=>family.run('validateBackup(state)'),/קרבה/);
 });
